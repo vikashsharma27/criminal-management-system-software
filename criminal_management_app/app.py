@@ -76,6 +76,66 @@ st.markdown(
             filter: brightness(0.98);
             opacity: 1;
         }
+        /* Custom Modern Dashboard Styles */
+        .metric-card {
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 1.1rem 1.2rem;
+            border: 1px solid #e2e8f0;
+            border-top: 4px solid #3b82f6;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+            margin-bottom: 0.8rem;
+        }
+        .metric-card.red { border-top-color: #ef4444; }
+        .metric-card.green { border-top-color: #10b981; }
+        .metric-card.purple { border-top-color: #8b5cf6; }
+        .metric-card.amber { border-top-color: #f59e0b; }
+        .metric-title {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.3rem;
+        }
+        .metric-value {
+            font-size: 1.75rem;
+            font-weight: 800;
+            color: #0f172a;
+            line-height: 1.2;
+        }
+        .metric-subtext {
+            font-size: 0.82rem;
+            color: #64748b;
+            margin-top: 0.3rem;
+            font-weight: 500;
+        }
+        .section-header-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #1e293b;
+            margin: 1.5rem 0 1rem 0;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        .filter-container {
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 1rem 1.2rem;
+            margin-bottom: 1.5rem;
+        }
+        .export-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 1.2rem;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+        }
     </style>
     """,
     unsafe_allow_html=True,
@@ -523,293 +583,412 @@ def main():
                 st.dataframe(results.rename(columns=LABELS), width="stretch")
 
     # ------------------------------------------------------------------
-    # Tab 3: Analytics
+    # Tab 3: Analytics Console
     # ------------------------------------------------------------------
     with tab_analytics:
-        data = fetch_all()
-        if data.empty:
-            st.info("No data available for charts. Add some records first.")
+        raw_data = fetch_all()
+        if raw_data.empty:
+            st.info("ℹ️ No data available for analytics. Please add criminal records first in the Manage Records tab.")
         else:
-            data["age"] = pd.to_numeric(data["age"], errors="coerce")
-            figures = []
+            raw_data["age"] = pd.to_numeric(raw_data["age"], errors="coerce")
+            
+            # ------------------------------------------------------------------
+            # Interactive Filter Console
+            # ------------------------------------------------------------------
+            st.markdown("<div class='section-header-box'>🎛️ Analytics Intelligence Console</div>", unsafe_allow_html=True)
+            
+            with st.container():
+                fc1, fc2, fc3 = st.columns(3)
+                
+                crime_types = ["All Crimes"] + sorted([str(c) for c in raw_data["crime_type"].dropna().unique() if str(c).strip()])
+                with fc1:
+                    sel_crime = st.selectbox("Filter Crime Type", crime_types)
+                    
+                wanted_options = ["All Statuses", "Wanted Only (Yes)", "Not Wanted (No)"]
+                with fc2:
+                    sel_wanted = st.selectbox("Filter Wanted Status", wanted_options)
+                    
+                gender_options = ["All Genders"] + sorted([str(g).title() for g in raw_data["gender"].dropna().unique() if str(g).strip()])
+                with fc3:
+                    sel_gender = st.selectbox("Filter Gender", gender_options)
+            
+            # Apply Filters
+            data = raw_data.copy()
+            if sel_crime != "All Crimes":
+                data = data[data["crime_type"].astype(str) == sel_crime]
+            if sel_wanted == "Wanted Only (Yes)":
+                data = data[data["wanted"].astype(str).str.lower() == "yes"]
+            elif sel_wanted == "Not Wanted (No)":
+                data = data[data["wanted"].astype(str).str.lower() == "no"]
+            if sel_gender != "All Genders":
+                data = data[data["gender"].astype(str).str.lower() == sel_gender.lower()]
 
-            def add_chart(fig):
-                figures.append(fig)
+            if data.empty:
+                st.warning("⚠️ No records match the selected filter criteria. Try resetting the filters above.")
+            else:
+                figures = []
 
-            def style_chart_surface(fig, ax):
-                fig.patch.set_facecolor("#f1f6f8")
-                fig.patch.set_edgecolor("#8aa2ad")
-                fig.patch.set_linewidth(1.5)
-                fig.patch.set_path_effects([
-                    patheffects.SimplePatchShadow(offset=(3, -3), alpha=0.18),
-                    patheffects.Normal(),
-                ])
-                ax.set_facecolor("#fbfdfe")
+                def add_chart(fig):
+                    figures.append(fig)
 
-            pie_figsize = (4, 4)
+                def style_chart_surface(fig, ax):
+                    fig.patch.set_facecolor("#ffffff")
+                    fig.patch.set_edgecolor("#e2e8f0")
+                    fig.patch.set_linewidth(1.0)
+                    ax.set_facecolor("#f8fafc")
+                    ax.tick_params(colors="#334155", labelsize=9)
+                    for spine in ax.spines.values():
+                        spine.set_color("#cbd5e1")
+                    if ax.title:
+                        ax.title.set_color("#0f172a")
+                        ax.title.set_fontsize(11)
+                        ax.title.set_fontweight("bold")
+                    ax.xaxis.label.set_color("#475569")
+                    ax.yaxis.label.set_color("#475569")
 
-            st.subheader("Crime Analysis")
-            crime_col1, crime_col2 = st.columns([1.6, 1])
-            with crime_col1:
-                crime_counts = data["crime_type"].value_counts().head(8)
-                fig, ax = plt.subplots(figsize=(8, 4.6))
-                colors = plt.cm.Set3(np.linspace(0, 1, len(crime_counts)))
-                bars = ax.bar(range(len(crime_counts)), crime_counts.values, color=colors, edgecolor="black")
-                ax.set_xticks(range(len(crime_counts)))
-                ax.set_xticklabels(crime_counts.index, rotation=45, ha="right")
-                ax.set_title("Crime Type Distribution")
-                ax.set_xlabel("Crime Type")
-                ax.set_ylabel("Number of Cases")
-                ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-                ax.grid(axis="y", alpha=0.3, linestyle="--")
-                for bar in bars:
-                    h = bar.get_height()
-                    ax.text(bar.get_x() + bar.get_width() / 2, h, f"{int(h)}", ha="center", va="bottom", fontweight="bold")
-                style_chart_surface(fig, ax)
-                fig.tight_layout()
-                st.pyplot(fig)
-                add_chart(fig)
+                pie_figsize = (4.2, 4.2)
 
-            with crime_col2:
-                top_crimes = crime_counts
-                fig, ax = plt.subplots(figsize=pie_figsize)
-                ax.pie(
-                    top_crimes.values,
-                    labels=top_crimes.index,
-                    autopct="%1.1f%%",
-                    startangle=90,
-                    radius=0.72,
-                    labeldistance=1.05,
-                    pctdistance=0.68,
-                    colors=plt.cm.Paired(np.linspace(0, 1, len(top_crimes))),
-                )
-                ax.set_title("Top Crime Types (%)")
-                style_chart_surface(fig, ax)
-                fig.tight_layout()
-                st.pyplot(fig, width=320)
-                add_chart(fig)
+                # ------------------------------------------------------------------
+                # KPI Tiles Header
+                # ------------------------------------------------------------------
+                total_cases = len(data)
+                total_raw = len(raw_data)
+                wanted_count = int((data["wanted"].astype(str).str.lower() == "yes").sum())
+                wanted_pct = (wanted_count / total_cases * 100) if total_cases > 0 else 0
+                
+                most_common_crime = data["crime_type"].mode()[0] if not data["crime_type"].mode().empty else "N/A"
+                top_crime_count = data["crime_type"].value_counts().iloc[0] if not data["crime_type"].value_counts().empty else 0
+                
+                avg_age = data["age"].mean()
+                avg_age_str = f"{avg_age:.1f} yrs" if pd.notna(avg_age) else "N/A"
 
-            st.subheader("Demographic Analysis")
-            demo_col1, demo_col2 = st.columns(2)
-            with demo_col1:
-                bins = [0, 18, 25, 35, 45, 55, 65, 100]
-                age_labels = ["Under 18", "18-25", "26-35", "36-45", "46-55", "56-65", "65+"]
-                age_groups = pd.cut(data["age"].dropna(), bins=bins, labels=age_labels, right=False)
-                age_group_counts = age_groups.value_counts().sort_index()
-                fig, ax = plt.subplots(figsize=(7, 4.4))
-                bars = ax.bar(
-                    age_group_counts.index,
-                    age_group_counts.values,
-                    color=plt.cm.Blues(np.linspace(0.4, 0.8, len(age_group_counts))),
-                    edgecolor="black",
-                )
-                for bar in bars:
-                    h = bar.get_height()
-                    if h > 0:
-                        ax.text(bar.get_x() + bar.get_width() / 2, h, f"{int(h)}", ha="center", va="bottom", fontweight="bold")
-                ax.set_title("Age Distribution")
-                ax.set_xlabel("Age Group")
-                ax.set_ylabel("Number of Criminals")
-                ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-                ax.grid(axis="y", alpha=0.3, linestyle="--")
-                style_chart_surface(fig, ax)
-                fig.tight_layout()
-                st.pyplot(fig)
-                add_chart(fig)
-
-            with demo_col2:
-                gender_counts = data["gender"].fillna("unknown").value_counts()
-                fig, ax = plt.subplots(figsize=pie_figsize)
-                ax.pie(
-                    gender_counts.values,
-                    labels=[g.title() for g in gender_counts.index],
-                    autopct="%1.1f%%",
-                    startangle=90,
-                    radius=0.72,
-                    labeldistance=1.05,
-                    pctdistance=0.68,
-                    colors=["#4ECDC4", "#FF6B6B", "#A78BFA"],
-                )
-                ax.set_title("Gender Distribution")
-                style_chart_surface(fig, ax)
-                fig.tight_layout()
-                st.pyplot(fig, width=320)
-                add_chart(fig)
-
-            st.subheader("Wanted & Occupation")
-            status_col1, status_col2 = st.columns([1.1, 1.3])
-            with status_col1:
-                wanted_counts = data["wanted"].value_counts()
-                colors_map = {"yes": "#FF6B6B", "no": "#4ECDC4"}
-                fig, ax = plt.subplots(figsize=(5.8, 4.2))
-                bars = ax.bar(
-                    wanted_counts.index,
-                    wanted_counts.values,
-                    color=[colors_map.get(x, "#888") for x in wanted_counts.index],
-                    edgecolor="black",
-                    width=0.5,
-                )
-                for bar in bars:
-                    h = bar.get_height()
-                    ax.text(bar.get_x() + bar.get_width() / 2, h, f"{int(h)}", ha="center", va="bottom", fontweight="bold")
-                ax.set_title("Wanted Status")
-                ax.set_xlabel("Status")
-                ax.set_ylabel("Number of Criminals")
-                ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-                ax.grid(axis="y", alpha=0.3, linestyle="--")
-                style_chart_surface(fig, ax)
-                fig.tight_layout()
-                st.pyplot(fig)
-                add_chart(fig)
-
-            with status_col2:
-                if data["occupation"].notna().any():
-                    occ_counts = data["occupation"].value_counts().head(10)
-                    fig, ax = plt.subplots(figsize=(6.2, 4.4))
-                    ax.barh(
-                        occ_counts.index[::-1],
-                        occ_counts.values[::-1],
-                        color=plt.cm.tab20c(np.linspace(0, 1, len(occ_counts))),
-                        edgecolor="black",
+                kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+                with kpi1:
+                    st.markdown(
+                        f"""
+                        <div class="metric-card">
+                            <div class="metric-title">📊 Total Cases</div>
+                            <div class="metric-value">{total_cases:,}</div>
+                            <div class="metric-subtext">out of {total_raw:,} total database records</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
                     )
-                    ax.set_title("Top 10 Occupations")
-                    ax.set_xlabel("Number of Criminals")
-                    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-                    ax.grid(axis="x", alpha=0.3, linestyle="--")
+                with kpi2:
+                    st.markdown(
+                        f"""
+                        <div class="metric-card red">
+                            <div class="metric-title">🚨 Wanted Criminals</div>
+                            <div class="metric-value">{wanted_count:,}</div>
+                            <div class="metric-subtext">{wanted_pct:.1f}% high risk suspects</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                with kpi3:
+                    st.markdown(
+                        f"""
+                        <div class="metric-card purple">
+                            <div class="metric-title">📈 Top Crime Category</div>
+                            <div class="metric-value" style="font-size: 1.35rem; font-weight: 700;">{most_common_crime}</div>
+                            <div class="metric-subtext">{top_crime_count} registered case(s)</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                with kpi4:
+                    st.markdown(
+                        f"""
+                        <div class="metric-card green">
+                            <div class="metric-title">👥 Avg Suspect Age</div>
+                            <div class="metric-value">{avg_age_str}</div>
+                            <div class="metric-subtext">demographic age center</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # ------------------------------------------------------------------
+                # Section 1: Crime Analysis
+                # ------------------------------------------------------------------
+                st.markdown("<div class='section-header-box'>📊 Crime Type & Pattern Analysis</div>", unsafe_allow_html=True)
+                crime_col1, crime_col2 = st.columns([1.6, 1])
+                
+                with crime_col1:
+                    crime_counts = data["crime_type"].value_counts().head(8)
+                    fig, ax = plt.subplots(figsize=(8, 4.6))
+                    palette = ["#3b82f6", "#06b6d4", "#8b5cf6", "#ec4899", "#10b981", "#f59e0b", "#ef4444", "#6366f1"]
+                    colors = [palette[i % len(palette)] for i in range(len(crime_counts))]
+                    bars = ax.bar(range(len(crime_counts)), crime_counts.values, color=colors, edgecolor="#ffffff", linewidth=1.2, width=0.6)
+                    ax.set_xticks(range(len(crime_counts)))
+                    ax.set_xticklabels(crime_counts.index, rotation=30, ha="right", fontweight="bold")
+                    ax.set_title("Top Registered Crime Categories")
+                    ax.set_xlabel("Crime Type")
+                    ax.set_ylabel("Number of Cases")
+                    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+                    ax.grid(axis="y", alpha=0.3, linestyle="--")
+                    for bar in bars:
+                        h = bar.get_height()
+                        ax.text(bar.get_x() + bar.get_width() / 2, h + 0.05, f"{int(h)}", ha="center", va="bottom", fontweight="bold", color="#1e293b")
                     style_chart_surface(fig, ax)
                     fig.tight_layout()
                     st.pyplot(fig)
                     add_chart(fig)
-                else:
-                    st.info("No occupation data available")
 
-            st.subheader("Wanted Status by Gender")
-            gender_wanted = pd.crosstab(data["gender"].fillna("unknown"), data["wanted"].fillna("no"))
-            fig, ax = plt.subplots(figsize=(9, 3.9))
-            gender_wanted.plot(kind="bar", ax=ax, color=["#FF6B6B", "#4ECDC4"], edgecolor="black", width=0.6)
-            ax.set_title("Wanted Status by Gender")
-            ax.set_xlabel("Gender")
-            ax.set_ylabel("Cases")
-            ax.legend(title="Wanted")
-            ax.grid(axis="y", alpha=0.3, linestyle="--")
-            plt.xticks(rotation=0)
-            style_chart_surface(fig, ax)
-            fig.tight_layout()
-            st.pyplot(fig)
-            add_chart(fig)
+                with crime_col2:
+                    top_crimes = crime_counts
+                    fig, ax = plt.subplots(figsize=pie_figsize)
+                    wedges, texts, autotexts = ax.pie(
+                        top_crimes.values,
+                        labels=top_crimes.index,
+                        autopct="%1.1f%%",
+                        startangle=90,
+                        pctdistance=0.72,
+                        colors=colors,
+                        wedgeprops=dict(width=0.42, edgecolor="white", linewidth=2),
+                    )
+                    plt.setp(autotexts, size=9, weight="bold", color="white")
+                    plt.setp(texts, size=8.5, weight="semibold")
+                    ax.set_title("Crime Share Breakdown (%)")
+                    style_chart_surface(fig, ax)
+                    fig.tight_layout()
+                    st.pyplot(fig, width=330)
+                    add_chart(fig)
 
-            st.subheader("Statistical Summary")
-            total = len(data)
-            avg_age = data["age"].mean()
-            median_age = data["age"].median()
-            std_age = data["age"].std()
-            most_common_crime = data["crime_type"].mode()[0] if not data["crime_type"].mode().empty else "N/A"
-            crime_frequency = data["crime_type"].value_counts().iloc[0] if not data["crime_type"].value_counts().empty else 0
-            wanted_count = int((data["wanted"] == "yes").sum())
-            wanted_percentage = (wanted_count / total * 100) if total else 0
-            male_count = int((data["gender"] == "male").sum())
-            female_count = int((data["gender"] == "female").sum())
-            male_percentage = (male_count / total * 100) if total else 0
-            female_percentage = (female_count / total * 100) if total else 0
-            youngest = data["age"].min()
-            oldest = data["age"].max()
-            age_range = (oldest - youngest) if pd.notna(oldest) and pd.notna(youngest) else np.nan
-
-            summary_rows = [
-                [
-                    ("Total Cases", f"{total:,}"),
-                    ("Average Age", f"{avg_age:.1f} yrs" if total else "N/A"),
-                    ("Median Age", f"{median_age:.1f} yrs" if total else "N/A"),
-                    ("Age Std Dev", f"{std_age:.1f} yrs" if total else "N/A"),
-                ],
-                [
-                    ("Most Common Crime", f"{most_common_crime}", f"{crime_frequency} case(s)"),
-                    ("Wanted Criminals", f"{wanted_count:,}", f"{wanted_percentage:.1f}%"),
-                    ("Male", f"{male_count:,}", f"{male_percentage:.1f}%"),
-                    ("Female", f"{female_count:,}", f"{female_percentage:.1f}%"),
-                ],
-                [
-                    ("Youngest Criminal", f"{youngest:.0f} yrs" if pd.notna(youngest) else "N/A"),
-                    ("Oldest Criminal", f"{oldest:.0f} yrs" if pd.notna(oldest) else "N/A"),
-                    ("Age Range", f"{age_range:.0f} yrs" if pd.notna(age_range) else "N/A"),
-                    ("Data Points", f"{len(data)}"),
-                ],
-            ]
-
-            for row in summary_rows:
-                cols = st.columns(4)
-                for col, item in zip(cols, row):
-                    if len(item) == 2:
-                        col.metric(item[0], item[1])
+                # ------------------------------------------------------------------
+                # Section 2: Demographic Analysis
+                # ------------------------------------------------------------------
+                st.markdown("<div class='section-header-box'>🧬 Demographic & Age Distribution</div>", unsafe_allow_html=True)
+                demo_col1, demo_col2 = st.columns([1.6, 1])
+                
+                with demo_col1:
+                    bins = [0, 18, 25, 35, 45, 55, 65, 100]
+                    age_labels = ["Under 18", "18-25", "26-35", "36-45", "46-55", "56-65", "65+"]
+                    valid_ages = data["age"].dropna()
+                    if not valid_ages.empty:
+                        age_groups = pd.cut(valid_ages, bins=bins, labels=age_labels, right=False)
+                        age_group_counts = age_groups.value_counts().sort_index()
+                        fig, ax = plt.subplots(figsize=(8, 4.4))
+                        bar_colors = ["#60a5fa", "#3b82f6", "#2563eb", "#1d4ed8", "#1e40af", "#1e3a8a", "#172554"]
+                        bars = ax.bar(
+                            age_group_counts.index,
+                            age_group_counts.values,
+                            color=bar_colors[:len(age_group_counts)],
+                            edgecolor="white",
+                            linewidth=1.2,
+                            width=0.55,
+                        )
+                        for bar in bars:
+                            h = bar.get_height()
+                            if h > 0:
+                                ax.text(bar.get_x() + bar.get_width() / 2, h + 0.05, f"{int(h)}", ha="center", va="bottom", fontweight="bold", color="#1e293b")
+                        ax.set_title("Criminal Age Group Breakdown")
+                        ax.set_xlabel("Age Group")
+                        ax.set_ylabel("Suspect Count")
+                        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+                        ax.grid(axis="y", alpha=0.3, linestyle="--")
+                        style_chart_surface(fig, ax)
+                        fig.tight_layout()
+                        st.pyplot(fig)
+                        add_chart(fig)
                     else:
-                        col.metric(item[0], item[1], item[2])
+                        st.info("No age data available for current filter.")
 
-            overview_labels = ["Male", "Female", "Wanted", "Not Wanted"]
-            overview_values = [male_count, female_count, wanted_count, total - wanted_count]
-            overview_data = [(lbl, val) for lbl, val in zip(overview_labels, overview_values) if val > 0]
-            if overview_data:
-                labels, values = zip(*overview_data)
-                fig, ax = plt.subplots(figsize=pie_figsize)
-                ax.pie(
-                    values,
-                    labels=labels,
-                    autopct="%1.1f%%",
-                    startangle=90,
-                    radius=0.72,
-                    labeldistance=1.05,
-                    pctdistance=0.68,
-                    colors=["#66B2FF", "#FF9999", "#FF6B6B", "#4ECDC4"][: len(values)],
-                )
-                ax.set_title("Quick Overview")
+                with demo_col2:
+                    gender_counts = data["gender"].fillna("unknown").astype(str).str.title().value_counts()
+                    fig, ax = plt.subplots(figsize=pie_figsize)
+                    gender_colors_map = {"Male": "#3b82f6", "Female": "#ec4899", "Unknown": "#94a3b8"}
+                    g_colors = [gender_colors_map.get(g, "#8b5cf6") for g in gender_counts.index]
+                    wedges, texts, autotexts = ax.pie(
+                        gender_counts.values,
+                        labels=gender_counts.index,
+                        autopct="%1.1f%%",
+                        startangle=90,
+                        pctdistance=0.72,
+                        colors=g_colors,
+                        wedgeprops=dict(width=0.42, edgecolor="white", linewidth=2),
+                    )
+                    plt.setp(autotexts, size=9, weight="bold", color="white")
+                    plt.setp(texts, size=9, weight="semibold")
+                    ax.set_title("Gender Ratio")
+                    style_chart_surface(fig, ax)
+                    fig.tight_layout()
+                    st.pyplot(fig, width=330)
+                    add_chart(fig)
+
+                # ------------------------------------------------------------------
+                # Section 3: Risk Profile & Occupations
+                # ------------------------------------------------------------------
+                st.markdown("<div class='section-header-box'>🚩 Risk Profiles & Occupations</div>", unsafe_allow_html=True)
+                status_col1, status_col2 = st.columns([1, 1.4])
+                
+                with status_col1:
+                    wanted_counts = data["wanted"].astype(str).str.lower().value_counts()
+                    labels_map = {"yes": "Wanted (Active)", "no": "Not Wanted (Captured)"}
+                    colors_map = {"yes": "#ef4444", "no": "#10b981"}
+                    display_labels = [labels_map.get(x, x.title()) for x in wanted_counts.index]
+                    
+                    fig, ax = plt.subplots(figsize=(5.8, 4.4))
+                    bars = ax.bar(
+                        display_labels,
+                        wanted_counts.values,
+                        color=[colors_map.get(x, "#64748b") for x in wanted_counts.index],
+                        edgecolor="white",
+                        linewidth=1.2,
+                        width=0.45,
+                    )
+                    for bar in bars:
+                        h = bar.get_height()
+                        ax.text(bar.get_x() + bar.get_width() / 2, h + 0.05, f"{int(h)}", ha="center", va="bottom", fontweight="bold", color="#1e293b")
+                    ax.set_title("Wanted vs Captured Status")
+                    ax.set_xlabel("Status")
+                    ax.set_ylabel("Number of Criminals")
+                    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+                    ax.grid(axis="y", alpha=0.3, linestyle="--")
+                    style_chart_surface(fig, ax)
+                    fig.tight_layout()
+                    st.pyplot(fig)
+                    add_chart(fig)
+
+                with status_col2:
+                    if data["occupation"].notna().any():
+                        occ_counts = data["occupation"].value_counts().head(10)
+                        fig, ax = plt.subplots(figsize=(7, 4.4))
+                        colors_occ = plt.cm.Blues(np.linspace(0.4, 0.9, len(occ_counts)))
+                        bars = ax.barh(
+                            occ_counts.index[::-1],
+                            occ_counts.values[::-1],
+                            color=colors_occ[::-1],
+                            edgecolor="white",
+                            linewidth=1.2,
+                            height=0.6,
+                        )
+                        for bar in bars:
+                            w = bar.get_width()
+                            ax.text(w + 0.05, bar.get_y() + bar.get_height() / 2, f"{int(w)}", ha="left", va="center", fontweight="bold", color="#1e293b")
+                        ax.set_title("Top Suspect Occupations")
+                        ax.set_xlabel("Number of Criminals")
+                        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+                        ax.grid(axis="x", alpha=0.3, linestyle="--")
+                        style_chart_surface(fig, ax)
+                        fig.tight_layout()
+                        st.pyplot(fig)
+                        add_chart(fig)
+                    else:
+                        st.info("No occupation data available for current filter selection.")
+
+                # ------------------------------------------------------------------
+                # Section 4: Cross Analysis (Wanted Status by Gender)
+                # ------------------------------------------------------------------
+                st.markdown("<div class='section-header-box'>⚔️ Cross-Analysis: Wanted Status by Gender</div>", unsafe_allow_html=True)
+                gender_wanted = pd.crosstab(data["gender"].fillna("unknown").astype(str).str.title(), data["wanted"].fillna("no").astype(str).str.lower())
+                gender_wanted = gender_wanted.rename(columns={"yes": "Wanted", "no": "Not Wanted"})
+                
+                fig, ax = plt.subplots(figsize=(9.5, 4.0))
+                gender_wanted.plot(kind="bar", ax=ax, color=["#10b981", "#ef4444"], edgecolor="white", width=0.5)
+                ax.set_title("Wanted Status Cross-Tabulation by Gender")
+                ax.set_xlabel("Gender")
+                ax.set_ylabel("Number of Cases")
+                ax.legend(title="Status", frameon=True, facecolor="#ffffff", edgecolor="#cbd5e1")
+                ax.grid(axis="y", alpha=0.3, linestyle="--")
+                plt.xticks(rotation=0, fontweight="bold")
                 style_chart_surface(fig, ax)
                 fig.tight_layout()
-                st.pyplot(fig, width=320)
+                st.pyplot(fig)
                 add_chart(fig)
 
-            st.divider()
-            st.subheader("Export Charts")
-            exp1, exp2 = st.columns(2)
+                # ------------------------------------------------------------------
+                # Section 5: Executive Statistical Summary Matrix
+                # ------------------------------------------------------------------
+                st.markdown("<div class='section-header-box'>📋 Detailed Statistical Metrics</div>", unsafe_allow_html=True)
+                
+                median_age = data["age"].median()
+                std_age = data["age"].std()
+                male_count = int((data["gender"].astype(str).str.lower() == "male").sum())
+                female_count = int((data["gender"].astype(str).str.lower() == "female").sum())
+                male_pct = (male_count / total_cases * 100) if total_cases else 0
+                female_pct = (female_count / total_cases * 100) if total_cases else 0
+                youngest = data["age"].min()
+                oldest = data["age"].max()
+                age_range = (oldest - youngest) if pd.notna(oldest) and pd.notna(youngest) else np.nan
 
-            with exp1:
-                pdf_buf = io.BytesIO()
-                with PdfPages(pdf_buf) as pdf:
-                    for f in figures:
-                        pdf.savefig(f, bbox_inches="tight")
-                pdf_buf.seek(0)
-                st.download_button(
-                    "📄 Export as PDF",
-                    data=pdf_buf,
-                    file_name="criminal_analytics_report.pdf",
-                    mime="application/pdf",
-                    width="stretch",
-                )
-
-            with exp2:
-                zip_buf = io.BytesIO()
-                chart_names = [
-                    "crime_type_distribution.png",
-                    "crime_type_pie.png",
-                    "age_distribution.png",
-                    "gender_distribution.png",
-                    "wanted_status.png",
-                    "top_occupations.png",
-                    "wanted_by_gender.png",
-                    "quick_overview.png",
+                summary_rows = [
+                    [
+                        ("Active Data Subset", f"{total_cases:,}", f"{total_cases/total_raw*100:.1f}% of DB"),
+                        ("Average Age", f"{avg_age:.1f} yrs" if pd.notna(avg_age) else "N/A"),
+                        ("Median Age", f"{median_age:.1f} yrs" if pd.notna(median_age) else "N/A"),
+                        ("Age Std Deviation", f"{std_age:.1f} yrs" if pd.notna(std_age) else "N/A"),
+                    ],
+                    [
+                        ("Top Crime Type", f"{most_common_crime}", f"{top_crime_count} case(s)"),
+                        ("Active Wanted", f"{wanted_count:,}", f"{wanted_pct:.1f}% risk"),
+                        ("Male Suspects", f"{male_count:,}", f"{male_pct:.1f}%"),
+                        ("Female Suspects", f"{female_count:,}", f"{female_pct:.1f}%"),
+                    ],
+                    [
+                        ("Youngest Suspect", f"{youngest:.0f} yrs" if pd.notna(youngest) else "N/A"),
+                        ("Oldest Suspect", f"{oldest:.0f} yrs" if pd.notna(oldest) else "N/A"),
+                        ("Age Span", f"{age_range:.0f} yrs" if pd.notna(age_range) else "N/A"),
+                        ("Total DB Capacity", f"{total_raw:,} records"),
+                    ],
                 ]
-                with zipfile.ZipFile(zip_buf, "w") as zf:
-                    for f, name in zip(figures, chart_names):
-                        img_buf = io.BytesIO()
-                        f.savefig(img_buf, format="png", dpi=200, bbox_inches="tight")
-                        zf.writestr(name, img_buf.getvalue())
-                zip_buf.seek(0)
-                st.download_button(
-                    "🖼️ Export Images (ZIP)",
-                    data=zip_buf,
-                    file_name="criminal_analytics_charts.zip",
-                    mime="application/zip",
-                    width="stretch",
-                )
+
+                for row in summary_rows:
+                    cols = st.columns(4)
+                    for col, item in zip(cols, row):
+                        with col:
+                            st.metric(label=item[0], value=item[1], delta=item[2] if len(item) > 2 else None)
+
+                # ------------------------------------------------------------------
+                # Section 6: Report Export Hub
+                # ------------------------------------------------------------------
+                st.markdown("<div class='section-header-box'>📥 Analytics Report Export Hub</div>", unsafe_allow_html=True)
+                exp1, exp2 = st.columns(2)
+
+                with exp1:
+                    st.markdown("<div class='export-card'><h4>📄 High-Res PDF Executive Report</h4><p style='color:#64748b; font-size:0.9rem;'>Download all high-resolution charts bundled into a print-ready PDF document.</p></div>", unsafe_allow_html=True)
+                    pdf_buf = io.BytesIO()
+                    with PdfPages(pdf_buf) as pdf:
+                        for f in figures:
+                            pdf.savefig(f, bbox_inches="tight")
+                    pdf_buf.seek(0)
+                    st.download_button(
+                        "📄 Download Analytics PDF Report",
+                        data=pdf_buf,
+                        file_name="criminal_analytics_executive_report.pdf",
+                        mime="application/pdf",
+                        width="stretch",
+                    )
+
+                with exp2:
+                    st.markdown("<div class='export-card'><h4>🖼️ Image Bundle (ZIP Archive)</h4><p style='color:#64748b; font-size:0.9rem;'>Export raw chart images in high 200 DPI PNG format for presentations.</p></div>", unsafe_allow_html=True)
+                    zip_buf = io.BytesIO()
+                    chart_names = [
+                        "crime_type_distribution.png",
+                        "crime_type_donut.png",
+                        "age_distribution.png",
+                        "gender_ratio.png",
+                        "wanted_status.png",
+                        "top_occupations.png",
+                        "wanted_by_gender.png",
+                    ]
+                    with zipfile.ZipFile(zip_buf, "w") as zf:
+                        for f, name in zip(figures, chart_names):
+                            img_buf = io.BytesIO()
+                            f.savefig(img_buf, format="png", dpi=200, bbox_inches="tight")
+                            zf.writestr(name, img_buf.getvalue())
+                    zip_buf.seek(0)
+                    st.download_button(
+                        "🖼️ Download PNG Charts ZIP",
+                        data=zip_buf,
+                        file_name="criminal_analytics_charts.zip",
+                        mime="application/zip",
+                        width="stretch",
+                    )
 
 
 if __name__ == "__main__":
     main()
+
