@@ -8,6 +8,7 @@ import matplotlib.patheffects as patheffects
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.ticker import MaxNLocator
 from datetime import datetime
+import sqlite3
 import io
 import os
 import zipfile
@@ -165,18 +166,38 @@ LABELS = {
 
 
 # ------------------------------------------------------------------
-# Database helpers
+# Database helpers (MySQL with SQLite Auto-Fallback for Cloud)
 # ------------------------------------------------------------------
+DB_ENGINE = "mysql"
+SQLITE_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "criminal_management.db")
+
+
 def get_connection(database=None):
-    return mysql.connector.connect(
-        host=DB_HOST, user=DB_USER, password=DB_PASSWORD,
-        database=database or DB_NAME, use_pure=True,
-    )
+    global DB_ENGINE
+    if DB_ENGINE == "sqlite":
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+    try:
+        return mysql.connector.connect(
+            host=DB_HOST, user=DB_USER, password=DB_PASSWORD,
+            database=database or DB_NAME, use_pure=True, connect_timeout=3,
+        )
+    except Exception:
+        DB_ENGINE = "sqlite"
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
 def ensure_database_ready():
+    global DB_ENGINE
+    # 1. Try MySQL first
     try:
-        conn = mysql.connector.connect(host=DB_HOST, user=DB_USER, password=DB_PASSWORD, use_pure=True)
+        conn = mysql.connector.connect(
+            host=DB_HOST, user=DB_USER, password=DB_PASSWORD,
+            use_pure=True, connect_timeout=3,
+        )
         cur = conn.cursor()
         cur.execute(f"CREATE DATABASE IF NOT EXISTS {DB_NAME}")
         cur.execute(f"USE {DB_NAME}")
@@ -202,68 +223,118 @@ def ensure_database_ready():
         )
         conn.commit()
         conn.close()
+        DB_ENGINE = "mysql"
         return True
-    except Exception as exc:
-        st.error(f"Failed to initialize database: {exc}")
-        return False
+    except Exception as mysql_exc:
+        # 2. Fallback to SQLite (ideal for Streamlit Cloud deployment)
+        try:
+            DB_ENGINE = "sqlite"
+            conn = sqlite3.connect(SQLITE_DB_PATH)
+            cur = conn.cursor()
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS criminal (
+                    case_id TEXT PRIMARY KEY,
+                    criminal_no TEXT,
+                    name TEXT,
+                    nick_name TEXT,
+                    arrest_date TEXT,
+                    date_of_crime TEXT,
+                    address TEXT,
+                    age TEXT,
+                    occupation TEXT,
+                    birth_mark TEXT,
+                    crime_type TEXT,
+                    father_name TEXT,
+                    gender TEXT,
+                    wanted TEXT
+                )
+                """
+            )
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as sqlite_exc:
+            st.error(f"Failed to initialize database: {sqlite_exc}")
+            return False
 
 
 def fetch_all():
     conn = get_connection()
     try:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM criminal")
-        rows = cursor.fetchall()
-        return pd.DataFrame(rows, columns=FIELDS)
+        if DB_ENGINE == "sqlite":
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM criminal")
+            rows = [dict(r) for r in cur.fetchall()]
+        else:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM criminal")
+            rows = cursor.fetchall()
+        return pd.DataFrame(rows, columns=FIELDS) if rows else pd.DataFrame(columns=FIELDS)
     finally:
         conn.close()
 
 
 def add_record(values):
     conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO criminal VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-        tuple(values[f] for f in FIELDS),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        p = "?" if DB_ENGINE == "sqlite" else "%s"
+        placeholders = ",".join([p] * len(FIELDS))
+        cur.execute(
+            f"INSERT INTO criminal VALUES ({placeholders})",
+            tuple(values[f] for f in FIELDS),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def update_record(values):
     conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """UPDATE criminal SET criminal_no=%s, name=%s, nick_name=%s, arrest_date=%s, date_of_crime=%s,
-        address=%s, age=%s, occupation=%s, birth_mark=%s, crime_type=%s, father_name=%s,
-        gender=%s, wanted=%s WHERE case_id=%s""",
-        (
+    try:
+        cur = conn.cursor()
+        p = "?" if DB_ENGINE == "sqlite" else "%s"
+        query = f"""UPDATE criminal SET criminal_no={p}, name={p}, nick_name={p}, arrest_date={p}, date_of_crime={p},
+        address={p}, age={p}, occupation={p}, birth_mark={p}, crime_type={p}, father_name={p},
+        gender={p}, wanted={p} WHERE case_id={p}"""
+        params = (
             values["criminal_no"], values["name"], values["nick_name"], values["arrest_date"],
             values["date_of_crime"], values["address"], values["age"], values["occupation"],
             values["birth_mark"], values["crime_type"], values["father_name"], values["gender"],
             values["wanted"], values["case_id"],
-        ),
-    )
-    conn.commit()
-    conn.close()
+        )
+        cur.execute(query, params)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def delete_record(case_id):
     conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM criminal WHERE case_id=%s", (case_id,))
-    conn.commit()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        p = "?" if DB_ENGINE == "sqlite" else "%s"
+        cur.execute(f"DELETE FROM criminal WHERE case_id={p}", (case_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def search_records(column, keyword):
     conn = get_connection()
     try:
-        cursor = conn.cursor(dictionary=True)
-        query = f"SELECT * FROM criminal WHERE {column} LIKE %s"
-        cursor.execute(query, (f"%{keyword}%",))
-        rows = cursor.fetchall()
-        return pd.DataFrame(rows, columns=FIELDS)
+        p = "?" if DB_ENGINE == "sqlite" else "%s"
+        query = f"SELECT * FROM criminal WHERE {column} LIKE {p}"
+        if DB_ENGINE == "sqlite":
+            cur = conn.cursor()
+            cur.execute(query, (f"%{keyword}%",))
+            rows = [dict(r) for r in cur.fetchall()]
+        else:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(query, (f"%{keyword}%",))
+            rows = cursor.fetchall()
+        return pd.DataFrame(rows, columns=FIELDS) if rows else pd.DataFrame(columns=FIELDS)
     finally:
         conn.close()
 
