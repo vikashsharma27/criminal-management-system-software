@@ -1,0 +1,5 @@
+#!/bin/bash
+echo "Installing requirements (first run only)..."
+pip install -r requirements.txt
+echo "Starting Criminal Management System..."
+streamlit run app.py
